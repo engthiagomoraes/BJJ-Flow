@@ -19,11 +19,15 @@ import {
   Trophy,
   Package,
   Plus,
-  BookOpen
+  BookOpen,
+  ShieldAlert,
+  Target
 } from 'lucide-react';
 import { useBjj } from '../context/BjjContext';
 import { BeltBadge } from '../components/ui/BeltBadge';
 import { StudentPdfReportModal } from '../components/report/StudentPdfReportModal';
+import { DevelopmentRadarChart } from '../components/charts/DevelopmentRadarChart';
+import { EVALUATION_DIMENSIONS, StudentEvaluation } from '../types';
 import { FileText } from 'lucide-react';
 
 export const AreaAluno: React.FC = () => {
@@ -38,7 +42,8 @@ export const AreaAluno: React.FC = () => {
     academySettings,
     toggleEnrollEvent,
     addPurchase,
-    getStudentGraduationStatus
+    getStudentGraduationStatus,
+    getStudentEvaluations
   } = useBjj();
 
   const [copiedPix, setCopiedPix] = useState(false);
@@ -46,9 +51,63 @@ export const AreaAluno: React.FC = () => {
   const [showPdfReport, setShowPdfReport] = useState(false);
   const [learnedCatFilter, setLearnedCatFilter] = useState('all');
   const [learnedSearch, setLearnedSearch] = useState('');
+  const [selectedEvalIndex, setSelectedEvalIndex] = useState(0);
 
-  // Find the student record matching current logged in user
-  const currentStudent = students.find(s => s.id === currentUser.studentId) || students[0];
+  // Verificação real de autenticação e autorização (sem fallback inseguro para students[0])
+  const currentStudent = currentUser.studentId 
+    ? students.find(s => s.id === currentUser.studentId)
+    : (currentUser.role === 'aluno' ? students.find(s => s.email.toLowerCase() === currentUser.email.toLowerCase()) : null);
+
+  // Se o usuário não possui vínculo com um aluno válido, exibe estado sem acesso autorizado
+  if (!currentStudent) {
+    return (
+      <div className="max-w-2xl mx-auto my-12 p-8 bg-white rounded-3xl border border-slate-200/90 shadow-xl text-center space-y-6">
+        <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto shadow-2xs">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100/70 px-3 py-1 rounded-full">
+            Controle de Acesso
+          </span>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            Portal Exclusivo para Alunos Matriculados
+          </h2>
+          <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
+            {currentUser.role === 'aluno'
+              ? `O usuário ${currentUser.email} está registrado como aluno, mas ainda não possui um cadastro de atleta ativo vinculado ao dojo.`
+              : `Você está autenticado como "${currentUser.nome}" (${currentUser.isMasterAdmin ? 'Mestre / Administrador Master' : currentUser.role === 'professor' ? 'Professor' : 'Gestor'}), sem matrícula de atleta vinculada.`}
+          </p>
+        </div>
+
+        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 max-w-md mx-auto text-left space-y-1.5">
+          <p className="font-bold text-slate-800">Para acessar este portal:</p>
+          <ul className="list-disc pl-4 space-y-1 text-slate-600">
+            <li>Alunos devem ter a matrícula ativa criada em <strong>Cadastros</strong> ou <strong>Equipe</strong>.</li>
+            <li>Professores e administradores gerenciam os atletas e suas avaliações pelo menu <strong>Equipe</strong>.</li>
+          </ul>
+        </div>
+
+        <div className="pt-2 flex items-center justify-center gap-3 flex-wrap">
+          <Link
+            to="/equipe"
+            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-sm"
+          >
+            Acessar Quadro de Alunos (Equipe)
+          </Link>
+          <Link
+            to="/"
+            className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all"
+          >
+            Voltar ao Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Avaliações de desenvolvimento históricas do aluno autenticado
+  const myEvaluations = getStudentEvaluations(currentStudent.id);
+  const activeEval = myEvaluations.length > 0 ? (myEvaluations[selectedEvalIndex] || myEvaluations[0]) : null;
 
   const learnedTechniques = currentStudent.tecnicasAprendidas || [];
   const filteredLearned = learnedTechniques.filter(t => {
@@ -319,101 +378,161 @@ export const AreaAluno: React.FC = () => {
 
         {/* 6 Dimensions of Performance Radar/Bar Card */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
                 <Activity className="w-5 h-5 text-blue-600" />
                 Meu Radar de Desempenho Técnico
               </h3>
               <p className="text-xs text-slate-500">
-                Avaliação dos 6 fundamentos pelo seu professor responsável
+                {activeEval 
+                  ? `Avaliação de ${new Date(activeEval.data + 'T12:00:00').toLocaleDateString('pt-BR')}${activeEval.avaliadorNome ? ` • Prof. ${activeEval.avaliadorNome}` : ''}`
+                  : 'Diagnóstico dos 6 fundamentos pelo professor responsável'}
               </p>
             </div>
-            <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">
-              {((currentStudent.performance.guarda + currentStudent.performance.passagem + currentStudent.performance.quedas + currentStudent.performance.finalizacoes + currentStudent.performance.defesa + currentStudent.performance.disciplina) / 6).toFixed(1)} / 10
+
+            {activeEval ? (
+              <div className="text-right">
+                <span className="text-xs font-extrabold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">
+                  Média: {((activeEval.scores.guarda + activeEval.scores.passagem + activeEval.scores.quedas + activeEval.scores.finalizacoes + activeEval.scores.defesa + activeEval.scores.disciplina) / 6).toFixed(1)} / 10
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  Média aritmética simples
+                </span>
+              </div>
+            ) : (
+              <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+                Sem avaliação formal
+              </span>
+            )}
+          </div>
+
+          {/* Histórico Seletor (quando houver mais de uma avaliação) */}
+          {myEvaluations.length > 1 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+              <span className="text-slate-400 font-bold shrink-0 text-[11px]">Histórico:</span>
+              {myEvaluations.map((ev, idx) => (
+                <button
+                  key={ev.id}
+                  onClick={() => setSelectedEvalIndex(idx)}
+                  className={`px-2.5 py-1 rounded-lg font-mono font-bold text-[11px] transition-all shrink-0 ${
+                    (selectedEvalIndex === idx || (!selectedEvalIndex && idx === 0))
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {new Date(ev.data + 'T12:00:00').toLocaleDateString('pt-BR')}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* CORPO DA AVALIAÇÃO OU ESTADO VAZIO */}
+          {activeEval ? (
+            <div className="space-y-4">
+              {/* Gráfico Radar */}
+              <div className="bg-slate-50/50 p-3 rounded-2xl border border-slate-100 flex flex-col items-center">
+                <DevelopmentRadarChart
+                  primaryEvaluation={activeEval}
+                  size={320}
+                  showLegend={false}
+                  compact={true}
+                />
+              </div>
+
+              {/* Foco de Desenvolvimento (se houver) */}
+              {activeEval.focoDesenvolvimento && (
+                <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-xs space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-800 font-bold text-[11px]">
+                    <Target className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Foco de Treino Recomendado:</span>
+                  </div>
+                  <p className="text-amber-950 font-medium leading-relaxed">
+                    {activeEval.focoDesenvolvimento}
+                  </p>
+                </div>
+              )}
+
+              {/* Observações do Professor (se houver) */}
+              {activeEval.observacoes && (
+                <div className="p-3 bg-slate-50 border border-slate-200/70 rounded-xl text-xs space-y-1">
+                  <span className="text-slate-500 font-bold text-[11px] block">
+                    Observações do Professor:
+                  </span>
+                  <p className="text-slate-700 leading-relaxed">
+                    {activeEval.observacoes}
+                  </p>
+                </div>
+              )}
+
+              {/* Detalhamento das 6 Dimensões com Barras */}
+              <div className="space-y-2.5 text-xs">
+                {EVALUATION_DIMENSIONS.map(dim => {
+                  const score = activeEval.scores[dim.key] ?? 0;
+                  return (
+                    <div key={`aluno-dim-${dim.key}`}>
+                      <div className="flex justify-between font-semibold mb-1">
+                        <span className="text-slate-700">{dim.label}</span>
+                        <span className="font-bold font-mono text-blue-700">{score.toFixed(1)} / 10</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                        <div 
+                          className="bg-blue-600 h-full rounded-full transition-all duration-500" 
+                          style={{ width: `${(score / 10) * 100}%` }} 
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Aviso Pedagógico */}
+              <p className="text-[11px] text-slate-400 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                ℹ️ <strong>Média Aritmética Simples:</strong> A nota geral ({((activeEval.scores.guarda + activeEval.scores.passagem + activeEval.scores.quedas + activeEval.scores.finalizacoes + activeEval.scores.defesa + activeEval.scores.disciplina) / 6).toFixed(1)}) apoia o direcionamento técnico do seu treino e não substitui os critérios regulamentares de carência e assiduidade para promoção por faixa.
+              </p>
+            </div>
+          ) : (
+            /* Estado Vazio quando não há avaliações históricas */
+            <div className="text-center py-8 px-4 bg-slate-50/60 rounded-2xl border border-dashed border-slate-200 space-y-3">
+              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+                <Activity className="w-6 h-6" />
+              </div>
+              <div className="max-w-sm mx-auto space-y-1">
+                <h4 className="font-bold text-slate-900 text-sm">
+                  Nenhuma avaliação técnica formal registrada
+                </h4>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Seu professor responsável lançará aqui os diagnósticos dos 6 fundamentos e o radar de habilidades conforme sua evolução nas aulas. Não atribuímos notas fictícias ou valor padrão inicial 5,0.
+                </p>
+              </div>
+
+              {currentStudent.performance && (
+                <div className="text-[11px] text-slate-400 bg-white p-2.5 rounded-xl border border-slate-200/60 max-w-sm mx-auto text-left">
+                  <span className="font-bold text-slate-600 block mb-0.5">Notas do Cadastro (Legado sem data):</span>
+                  <span>Guarda {currentStudent.performance.guarda} • Passagem {currentStudent.performance.passagem} • Quedas {currentStudent.performance.quedas} • Finalizações {currentStudent.performance.finalizacoes} • Defesa {currentStudent.performance.defesa} • Disciplina {currentStudent.performance.disciplina}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Indicadores de Sparring e Rola Preservados de Student.performance */}
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+              Indicadores de Treino (Sparring)
             </span>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            {/* Guarda */}
-            <div>
-              <div className="flex justify-between font-semibold mb-1">
-                <span className="text-slate-700">Guarda & Retenção</span>
-                <span className="font-bold font-mono text-blue-700">{currentStudent.performance.guarda} / 10</span>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="bg-slate-50 p-2 rounded-lg">
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Tempo Rola</span>
+                <span className="font-bold text-slate-900">{currentStudent.performance?.tempoRolaMinutos || 0} min</span>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-blue-600 h-full rounded-full" style={{ width: `${currentStudent.performance.guarda * 10}%` }} />
+              <div className="bg-slate-50 p-2 rounded-lg">
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Finalizações</span>
+                <span className="font-bold text-emerald-600">{currentStudent.performance?.finalizacoesAplicadas || 0}</span>
               </div>
-            </div>
-
-            {/* Passagem */}
-            <div>
-              <div className="flex justify-between font-semibold mb-1">
-                <span className="text-slate-700">Passagem de Guarda</span>
-                <span className="font-bold font-mono text-indigo-700">{currentStudent.performance.passagem} / 10</span>
+              <div className="bg-slate-50 p-2 rounded-lg">
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Raspagens</span>
+                <span className="font-bold text-blue-600">{currentStudent.performance?.raspagensFeitas || 0}</span>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${currentStudent.performance.passagem * 10}%` }} />
-              </div>
-            </div>
-
-            {/* Quedas */}
-            <div>
-              <div className="flex justify-between font-semibold mb-1">
-                <span className="text-slate-700">Luta em Pé & Quedas</span>
-                <span className="font-bold font-mono text-amber-700">{currentStudent.performance.quedas} / 10</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-amber-600 h-full rounded-full" style={{ width: `${currentStudent.performance.quedas * 10}%` }} />
-              </div>
-            </div>
-
-            {/* Finalizações */}
-            <div>
-              <div className="flex justify-between font-semibold mb-1">
-                <span className="text-slate-700">Precisão de Finalizações</span>
-                <span className="font-bold font-mono text-emerald-700">{currentStudent.performance.finalizacoes} / 10</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-emerald-600 h-full rounded-full" style={{ width: `${currentStudent.performance.finalizacoes * 10}%` }} />
-              </div>
-            </div>
-
-            {/* Defesa */}
-            <div>
-              <div className="flex justify-between font-semibold mb-1">
-                <span className="text-slate-700">Defesa & Sobrevivência</span>
-                <span className="font-bold font-mono text-rose-700">{currentStudent.performance.defesa} / 10</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-rose-600 h-full rounded-full" style={{ width: `${currentStudent.performance.defesa * 10}%` }} />
-              </div>
-            </div>
-
-            {/* Disciplina */}
-            <div>
-              <div className="flex justify-between font-semibold mb-1">
-                <span className="text-slate-700">Disciplina & Pontualidade</span>
-                <span className="font-bold font-mono text-purple-700">{currentStudent.performance.disciplina} / 10</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-purple-600 h-full rounded-full" style={{ width: `${currentStudent.performance.disciplina * 10}%` }} />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center text-xs">
-            <div className="bg-slate-50 p-2 rounded-lg">
-              <span className="text-[10px] text-slate-400 block uppercase font-bold">Tempo Rola</span>
-              <span className="font-bold text-slate-900">{currentStudent.performance.tempoRolaMinutos} min</span>
-            </div>
-            <div className="bg-slate-50 p-2 rounded-lg">
-              <span className="text-[10px] text-slate-400 block uppercase font-bold">Finalizações</span>
-              <span className="font-bold text-emerald-600">{currentStudent.performance.finalizacoesAplicadas}</span>
-            </div>
-            <div className="bg-slate-50 p-2 rounded-lg">
-              <span className="text-[10px] text-slate-400 block uppercase font-bold">Raspagens</span>
-              <span className="font-bold text-blue-600">{currentStudent.performance.raspagensFeitas}</span>
             </div>
           </div>
         </div>

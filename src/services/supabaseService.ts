@@ -15,7 +15,8 @@ import {
   BeltColor,
   PlanType,
   PaymentStatus,
-  GraduationSystemType
+  GraduationSystemType,
+  StudentEvaluation
 } from '../types';
 
 export const REQUIRED_SUPABASE_TABLES = [
@@ -28,7 +29,8 @@ export const REQUIRED_SUPABASE_TABLES = [
   { name: 'planos_aula', label: 'Planejamento de Aulas', description: 'Planos pedagógicos, temas técnicos e blocos de treino' },
   { name: 'tecnicas', label: 'Biblioteca de Técnicas', description: 'Acervo de posições, quedas, raspagens e finalizações' },
   { name: 'usuarios', label: 'Usuários & Permissões', description: 'Contas de acesso, administrador master e privilégios' },
-  { name: 'configuracoes_academia', label: 'Configurações da Academia', description: 'Regras da IBJJF, dados do dojo e parâmetros globais' }
+  { name: 'configuracoes_academia', label: 'Configurações da Academia', description: 'Regras da IBJJF, dados do dojo e parâmetros globais' },
+  { name: 'avaliacoes_desenvolvimento', label: 'Avaliações de Desenvolvimento', description: 'Diagnósticos pedagógicos das 6 dimensões e histórico de evolução dos alunos' }
 ];
 
 export const SUPABASE_SCHEMA_SQL = `-- ==============================================================================
@@ -231,15 +233,31 @@ CREATE TABLE IF NOT EXISTS public.configuracoes_academia (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 12. ÍNDICES DE PERFORMANCE
+-- 12. TABELA DE AVALIAÇÕES DE DESENVOLVIMENTO (HISTÓRICO PEDAGÓGICO)
+CREATE TABLE IF NOT EXISTS public.avaliacoes_desenvolvimento (
+    id TEXT PRIMARY KEY,
+    student_id TEXT NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    avaliador_id TEXT,
+    avaliador_nome TEXT,
+    scores JSONB NOT NULL DEFAULT '{}'::jsonb,
+    observacoes TEXT,
+    foco_desenvolvimento TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+-- 13. ÍNDICES DE PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_alunos_faixa ON public.alunos(faixa);
 CREATE INDEX IF NOT EXISTS idx_presencas_student ON public.presencas(student_id);
 CREATE INDEX IF NOT EXISTS idx_presencas_data ON public.presencas(data);
 CREATE INDEX IF NOT EXISTS idx_pagamentos_student ON public.pagamentos(student_id);
 CREATE INDEX IF NOT EXISTS idx_pagamentos_status ON public.pagamentos(status);
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON public.usuarios(email);
+CREATE INDEX IF NOT EXISTS idx_avaliacoes_student_id ON public.avaliacoes_desenvolvimento(student_id);
+CREATE INDEX IF NOT EXISTS idx_avaliacoes_data ON public.avaliacoes_desenvolvimento(data);
 
--- 13. HABILITAR ROW LEVEL SECURITY (RLS) E POLÍTICAS PERMISSIVAS
+-- 14. HABILITAR ROW LEVEL SECURITY (RLS) E POLÍTICAS PERMISSIVAS
 ALTER TABLE public.alunos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.professores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.turmas ENABLE ROW LEVEL SECURITY;
@@ -250,6 +268,7 @@ ALTER TABLE public.planos_aula ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tecnicas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.configuracoes_academia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.avaliacoes_desenvolvimento ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para acesso público/autenticado da aplicação (Anon + Authenticated)
 DO $$
@@ -283,6 +302,9 @@ BEGIN
 
     DROP POLICY IF EXISTS "Acesso Total Configuracoes" ON public.configuracoes_academia;
     CREATE POLICY "Acesso Total Configuracoes" ON public.configuracoes_academia FOR ALL USING (true) WITH CHECK (true);
+
+    DROP POLICY IF EXISTS "Acesso Total Avaliacoes" ON public.avaliacoes_desenvolvimento;
+    CREATE POLICY "Acesso Total Avaliacoes" ON public.avaliacoes_desenvolvimento FOR ALL USING (true) WITH CHECK (true);
 END $$;
 
 -- 14. SEED DO USUÁRIO ADMINISTRADOR MASTER (THIAGO LOPES DE MORAES SILVA)
@@ -621,6 +643,7 @@ export async function exportAllToSupabase(
     techniques: Technique[];
     allUsers: AuthUser[];
     academySettings: AcademySettings;
+    evaluations?: StudentEvaluation[];
   }
 ): Promise<{ success: boolean; details: Record<string, number>; errors: string[] }> {
   const cleanUrl = url.trim().replace(/\/+$/, '');
@@ -924,6 +947,30 @@ export async function exportAllToSupabase(
     errors.push(`Configurações: ${err.message}`);
   }
 
+  // 11. Avaliações de Desenvolvimento (Histórico Pedagógico)
+  if (data.evaluations && data.evaluations.length > 0) {
+    try {
+      const formattedEvals = data.evaluations.map(ev => ({
+        id: ev.id,
+        student_id: ev.studentId,
+        data: ev.data,
+        avaliador_id: ev.avaliadorId || null,
+        avaliador_nome: ev.avaliadorNome || null,
+        scores: ev.scores || {},
+        observacoes: ev.observacoes || null,
+        foco_desenvolvimento: ev.focoDesenvolvimento || null,
+        created_at: ev.createdAt,
+        updated_at: ev.updatedAt
+      }));
+
+      const { error } = await client.from('avaliacoes_desenvolvimento').upsert(formattedEvals, { onConflict: 'id' });
+      if (error) throw error;
+      details['avaliacoes_desenvolvimento'] = formattedEvals.length;
+    } catch (err: any) {
+      errors.push(`Avaliações: ${err.message}`);
+    }
+  }
+
   return {
     success: errors.length === 0,
     details,
@@ -945,6 +992,7 @@ export async function importAllFromSupabase(
   techniques?: Technique[];
   allUsers?: AuthUser[];
   academySettings?: Partial<AcademySettings>;
+  evaluations?: StudentEvaluation[];
   error?: string;
 }> {
   const cleanUrl = url.trim().replace(/\/+$/, '');
@@ -1167,6 +1215,32 @@ export async function importAllFromSupabase(
       };
     }
 
+    // 11. Avaliações de Desenvolvimento (Histórico Pedagógico)
+    let evaluations: StudentEvaluation[] = [];
+    try {
+      const { data: rawEvals, error: evError } = await client
+        .from('avaliacoes_desenvolvimento')
+        .select('*')
+        .order('data', { ascending: false });
+
+      if (!evError && rawEvals) {
+        evaluations = rawEvals.map(r => ({
+          id: r.id,
+          studentId: r.student_id,
+          data: r.data,
+          avaliadorId: r.avaliador_id || undefined,
+          avaliadorNome: r.avaliador_nome || undefined,
+          scores: r.scores || { guarda: 0, passagem: 0, quedas: 0, finalizacoes: 0, defesa: 0, disciplina: 0 },
+          observacoes: r.observacoes || undefined,
+          focoDesenvolvimento: r.foco_desenvolvimento || undefined,
+          createdAt: r.created_at || new Date().toISOString(),
+          updatedAt: r.updated_at || new Date().toISOString()
+        }));
+      }
+    } catch (e) {
+      console.warn('Tabela avaliacoes_desenvolvimento pode não existir ainda no Supabase:', e);
+    }
+
     return {
       students,
       instructors,
@@ -1177,7 +1251,8 @@ export async function importAllFromSupabase(
       lessonPlans,
       techniques,
       allUsers,
-      academySettings
+      academySettings,
+      evaluations
     };
   } catch (err: any) {
     const msg = err.message || '';
@@ -1203,6 +1278,7 @@ export function generateDataMigrationSql(data: {
   techniques: Technique[];
   allUsers: AuthUser[];
   academySettings: AcademySettings;
+  evaluations?: StudentEvaluation[];
 }): string {
   const escapeSql = (str?: string | null): string => {
     if (str === null || str === undefined) return 'NULL';
@@ -1311,6 +1387,15 @@ export function generateDataMigrationSql(data: {
   lines.push('-- 10. INSERIR CONFIGURAÇÕES DA ACADEMIA');
   lines.push(`INSERT INTO public.configuracoes_academia (id, nome_academia, mestre_responsavel, faixa_mestre, graus_mestre, registro_cbjj_mestre, unidade_principal, telefone, email, chave_pix, banco, sistema_graduacao_padrao, aulas_por_grau, aulas_por_faixa_direta, valor_padrao_regular, valor_padrao_infantil, valor_padrao_bolsista, regras_graduacao) VALUES ('settings_main', ${escapeSql(s.nomeAcademia)}, ${escapeSql(s.mestreResponsavel)}, ${escapeSql(s.faixaMestre)}, ${s.grausMestre}, ${escapeSql(s.registroCBJJMestre)}, ${escapeSql(s.unidadePrincipal)}, ${escapeSql(s.telefone)}, ${escapeSql(s.email)}, ${escapeSql(s.chavePix)}, ${escapeSql(s.banco)}, ${escapeSql(s.sistemaGraduacaoPadrao || 'graus_e_faixas')}, ${s.aulasPorGrau}, ${s.aulasPorFaixaDireta}, ${s.valorPadraoRegular}, ${s.valorPadraoInfantil}, ${s.valorPadraoBolsista}, ${escapeJson(s.regrasGraduacao)}) ON CONFLICT (id) DO UPDATE SET nome_academia = EXCLUDED.nome_academia, mestre_responsavel = EXCLUDED.mestre_responsavel, chave_pix = EXCLUDED.chave_pix, regras_graduacao = EXCLUDED.regras_graduacao, updated_at = now();`);
   lines.push('');
+
+  // 11. Avaliações de Desenvolvimento (Histórico Pedagógico)
+  if (data.evaluations && data.evaluations.length > 0) {
+    lines.push('-- 11. INSERIR AVALIAÇÕES DE DESENVOLVIMENTO (HISTÓRICO PEDAGÓGICO)');
+    for (const ev of data.evaluations) {
+      lines.push(`INSERT INTO public.avaliacoes_desenvolvimento (id, student_id, data, avaliador_id, avaliador_nome, scores, observacoes, foco_desenvolvimento, created_at, updated_at) VALUES (${escapeSql(ev.id)}, ${escapeSql(ev.studentId)}, ${escapeSql(ev.data)}, ${escapeSql(ev.avaliadorId)}, ${escapeSql(ev.avaliadorNome)}, ${escapeJson(ev.scores)}, ${escapeSql(ev.observacoes)}, ${escapeSql(ev.focoDesenvolvimento)}, ${escapeSql(ev.createdAt)}, ${escapeSql(ev.updatedAt)}) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, scores = EXCLUDED.scores, observacoes = EXCLUDED.observacoes, foco_desenvolvimento = EXCLUDED.foco_desenvolvimento, updated_at = EXCLUDED.updated_at;`);
+    }
+    lines.push('');
+  }
 
   lines.push('COMMIT;');
   lines.push('');

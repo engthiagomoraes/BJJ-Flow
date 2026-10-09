@@ -27,7 +27,9 @@ import {
   DEFAULT_ADMIN_PERMISSIONS,
   DEFAULT_PROFESSOR_PERMISSIONS,
   DEFAULT_STUDENT_PERMISSIONS,
-  SupabaseConfig
+  SupabaseConfig,
+  StudentEvaluation,
+  DevelopmentScores
 } from '../types';
 import { 
   INITIAL_STUDENTS, 
@@ -46,7 +48,7 @@ import {
   DEFAULT_ACADEMY_SETTINGS,
   DEFAULT_IBJJF_BELT_RULES
 } from '../data/mockData';
-import { exportAllToSupabase, importAllFromSupabase, isSecretApiKey } from '../services/supabaseService';
+import { exportAllToSupabase, importAllFromSupabase, isSecretApiKey, getSupabaseClient } from '../services/supabaseService';
 
 interface BjjContextType {
   currentUser: AuthUser;
@@ -85,6 +87,7 @@ interface BjjContextType {
   products: AcademyProduct[];
   events: AcademyEvent[];
   purchases: StudentPurchase[];
+  evaluations: StudentEvaluation[];
   
   // Actions
   addAttendance: (studentId: string, classId: string, date?: string, time?: string) => void;
@@ -143,6 +146,12 @@ interface BjjContextType {
   toggleEnrollEvent: (eventId: string, studentId: string) => void;
   addPurchase: (produtoId: string, studentId: string) => void;
   
+  // Avaliação de Desenvolvimento Histórica
+  addStudentEvaluation: (evalData: Omit<StudentEvaluation, 'id' | 'createdAt' | 'updatedAt'>) => Promise<StudentEvaluation>;
+  updateStudentEvaluation: (id: string, evalData: Partial<Omit<StudentEvaluation, 'id' | 'studentId' | 'createdAt'>>) => Promise<void>;
+  deleteStudentEvaluation: (id: string) => Promise<void>;
+  getStudentEvaluations: (studentId: string) => StudentEvaluation[];
+
   resetDataToDefault: () => void;
 }
 
@@ -223,6 +232,7 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [products, setProducts] = useState<AcademyProduct[]>(() => loadFromStorage('products', INITIAL_PRODUCTS));
   const [events, setEvents] = useState<AcademyEvent[]>(() => loadFromStorage('events', INITIAL_EVENTS));
   const [purchases, setPurchases] = useState<StudentPurchase[]>(() => loadFromStorage('purchases', INITIAL_PURCHASES));
+  const [evaluations, setEvaluations] = useState<StudentEvaluation[]>(() => loadFromStorage<StudentEvaluation[]>('evaluations', []));
   const [academySettings, setAcademySettings] = useState<AcademySettings>(() => {
     const loaded = loadFromStorage('academySettings', DEFAULT_ACADEMY_SETTINGS);
     return {
@@ -290,7 +300,8 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lessonPlans,
       techniques,
       allUsers,
-      academySettings
+      academySettings,
+      evaluations
     });
 
     if (res.success) {
@@ -330,6 +341,7 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (res.lessonPlans && res.lessonPlans.length > 0) setLessonPlans(res.lessonPlans);
     if (res.techniques && res.techniques.length > 0) setTechniques(res.techniques);
     if (res.allUsers && res.allUsers.length > 0) setAllUsers(res.allUsers);
+    if (res.evaluations && res.evaluations.length > 0) setEvaluations(res.evaluations);
     if (res.academySettings) {
       setAcademySettings(prev => ({
         ...prev,
@@ -361,6 +373,7 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => saveToStorage('products', products), [products]);
   useEffect(() => saveToStorage('events', events), [events]);
   useEffect(() => saveToStorage('purchases', purchases), [purchases]);
+  useEffect(() => saveToStorage('evaluations', evaluations), [evaluations]);
   useEffect(() => saveToStorage('academySettings', academySettings), [academySettings]);
 
   // Auth logic & User Management
@@ -583,9 +596,10 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (result.length === 0 && plan.tecnicaPrincipal) {
+      const tecPrinc = plan.tecnicaPrincipal;
       allTechniques.forEach(tech => {
         if (
-          (plan.tecnicaPrincipal.toLowerCase().includes(tech.titulo.toLowerCase()) ||
+          (tecPrinc.toLowerCase().includes(tech.titulo.toLowerCase()) ||
            plan.temaPrincipal.toLowerCase().includes(tech.titulo.toLowerCase())) &&
           !addedTitles.has(tech.titulo.toLowerCase())
         ) {
@@ -598,8 +612,8 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
-      if (result.length === 0 && plan.tecnicaPrincipal.trim()) {
-        const cleanTitle = plan.tecnicaPrincipal.split(':')[1]?.trim() || plan.tecnicaPrincipal.split('.')[0]?.trim() || plan.tecnicaPrincipal;
+      if (result.length === 0 && tecPrinc.trim()) {
+        const cleanTitle = tecPrinc.split(':')[1]?.trim() || tecPrinc.split('.')[0]?.trim() || tecPrinc;
         result.push({
           titulo: cleanTitle.slice(0, 50),
           categoria: 'Posição do Dia'
@@ -619,8 +633,9 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const plan = lessonPlans.find(lp => 
       lp.data === dateStr && (
         lp.turma === turmaObj.titulo || 
-        turmaObj.titulo.toLowerCase().includes(lp.turma.toLowerCase()) || 
-        lp.turma.toLowerCase().includes(turmaObj.titulo.toLowerCase())
+        (lp.turma && turmaObj.titulo.toLowerCase().includes(lp.turma.toLowerCase())) || 
+        (lp.turma && lp.turma.toLowerCase().includes(turmaObj.titulo.toLowerCase())) ||
+        lp.turmaId === turmaObj.id
       )
     ) || lessonPlans.find(lp => lp.data === dateStr);
 
@@ -1378,8 +1393,9 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const attendancesForPlan = attendance.filter(a => 
       a.data === plan.data && (
         a.turmaTitulo === plan.turma ||
-        a.turmaTitulo.toLowerCase().includes(plan.turma.toLowerCase()) ||
-        plan.turma.toLowerCase().includes(a.turmaTitulo.toLowerCase())
+        (plan.turma && a.turmaTitulo.toLowerCase().includes(plan.turma.toLowerCase())) ||
+        (plan.turma && plan.turma.toLowerCase().includes(a.turmaTitulo.toLowerCase())) ||
+        (plan.turmaId && a.turmaId === plan.turmaId)
       )
     );
 
@@ -1578,6 +1594,189 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProducts(prev => prev.map(p => p.id === id ? { ...p, estoque: Math.max(0, p.estoque + delta) } : p));
   };
 
+  // Avaliação Histórica de Desenvolvimento dos Alunos
+  const getStudentEvaluations = (studentId: string): StudentEvaluation[] => {
+    return evaluations
+      .filter(e => e.studentId === studentId)
+      .sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+  };
+
+  const addStudentEvaluation = async (
+    evalData: Omit<StudentEvaluation, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<StudentEvaluation> => {
+    // 1. Verificação de Autorização
+    if (currentUser.role === 'aluno') {
+      throw new Error('Acesso negado: Alunos não possuem autorização para registrar avaliações técnicas.');
+    }
+
+    const targetStudent = students.find(s => s.id === evalData.studentId);
+    if (!targetStudent) {
+      throw new Error('Aluno não encontrado para vinculação da avaliação.');
+    }
+
+    if (currentUser.role === 'professor' && !currentUser.isMasterAdmin) {
+      const isMyStudent = targetStudent.professorId === currentUser.professorId ||
+        (targetStudent.professorNome && targetStudent.professorNome.toLowerCase() === currentUser.nome.toLowerCase()) ||
+        hasPermission('canManageStudents');
+      if (!isMyStudent) {
+        throw new Error('Acesso negado: Você só pode avaliar alunos sob sua responsabilidade técnica.');
+      }
+    }
+
+    // 2. Validação rigorosa de notas: 0 a 10 em passos de 0,5
+    const dimensions: (keyof DevelopmentScores)[] = ['guarda', 'passagem', 'quedas', 'finalizacoes', 'defesa', 'disciplina'];
+    for (const dim of dimensions) {
+      const val = evalData.scores[dim];
+      if (typeof val !== 'number' || isNaN(val) || val < 0 || val > 10) {
+        throw new Error(`Nota inválida para a dimensão "${dim}": deve estar entre 0.0 e 10.0.`);
+      }
+      if (Math.round(val * 2) !== val * 2) {
+        throw new Error(`Nota para a dimensão "${dim}" (${val}) deve respeitar o incremento de 0,5.`);
+      }
+    }
+
+    if (!evalData.data || !/^\d{4}-\d{2}-\d{2}$/.test(evalData.data)) {
+      throw new Error('Data da avaliação inválida (formato esperado: AAAA-MM-DD).');
+    }
+
+    const nowIso = new Date().toISOString();
+    const newEval: StudentEvaluation = {
+      ...evalData,
+      id: `eval-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    setEvaluations(prev => [newEval, ...prev]);
+
+    // Sincronização em segundo plano se Supabase estiver ativo
+    if (supabaseConfig.enabled && supabaseConfig.autoSync && supabaseConfig.url && supabaseConfig.anonKey) {
+      const client = getSupabaseClient(supabaseConfig);
+      if (client) {
+        client.from('avaliacoes_desenvolvimento').insert({
+          id: newEval.id,
+          student_id: newEval.studentId,
+          data: newEval.data,
+          avaliador_id: newEval.avaliadorId || null,
+          avaliador_nome: newEval.avaliadorNome || null,
+          scores: newEval.scores,
+          observacoes: newEval.observacoes || null,
+          foco_desenvolvimento: newEval.focoDesenvolvimento || null,
+          created_at: newEval.createdAt,
+          updated_at: newEval.updatedAt
+        }).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar avaliação com Supabase:', error);
+        });
+      }
+    }
+
+    return newEval;
+  };
+
+  const updateStudentEvaluation = async (
+    id: string,
+    evalData: Partial<Omit<StudentEvaluation, 'id' | 'studentId' | 'createdAt'>>
+  ): Promise<void> => {
+    if (currentUser.role === 'aluno') {
+      throw new Error('Acesso negado: Alunos não possuem autorização para editar avaliações.');
+    }
+
+    const currentEval = evaluations.find(e => e.id === id);
+    if (!currentEval) {
+      throw new Error('Avaliação não encontrada.');
+    }
+
+    const targetStudent = students.find(s => s.id === currentEval.studentId);
+    if (currentUser.role === 'professor' && !currentUser.isMasterAdmin) {
+      const isMyStudent = (targetStudent && (
+        targetStudent.professorId === currentUser.professorId ||
+        (targetStudent.professorNome && targetStudent.professorNome.toLowerCase() === currentUser.nome.toLowerCase())
+      )) || hasPermission('canManageStudents');
+      if (!isMyStudent) {
+        throw new Error('Acesso negado: Você só pode editar avaliações de alunos sob sua responsabilidade técnica.');
+      }
+    }
+
+    if (evalData.scores) {
+      const dimensions: (keyof DevelopmentScores)[] = ['guarda', 'passagem', 'quedas', 'finalizacoes', 'defesa', 'disciplina'];
+      for (const dim of dimensions) {
+        const val = evalData.scores[dim];
+        if (val !== undefined) {
+          if (typeof val !== 'number' || isNaN(val) || val < 0 || val > 10) {
+            throw new Error(`Nota inválida para a dimensão "${dim}": deve estar entre 0.0 e 10.0.`);
+          }
+          if (Math.round(val * 2) !== val * 2) {
+            throw new Error(`Nota para a dimensão "${dim}" (${val}) deve respeitar o incremento de 0,5.`);
+          }
+        }
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    let updatedObj: StudentEvaluation | null = null;
+    setEvaluations(prev => prev.map(e => {
+      if (e.id === id) {
+        updatedObj = {
+          ...e,
+          ...evalData,
+          scores: evalData.scores ? { ...e.scores, ...evalData.scores } : e.scores,
+          updatedAt: nowIso
+        };
+        return updatedObj;
+      }
+      return e;
+    }));
+
+    if (supabaseConfig.enabled && supabaseConfig.autoSync && supabaseConfig.url && supabaseConfig.anonKey && updatedObj) {
+      const client = getSupabaseClient(supabaseConfig);
+      if (client) {
+        const u = updatedObj as StudentEvaluation;
+        client.from('avaliacoes_desenvolvimento').update({
+          data: u.data,
+          avaliador_id: u.avaliadorId || null,
+          avaliador_nome: u.avaliadorNome || null,
+          scores: u.scores,
+          observacoes: u.observacoes || null,
+          foco_desenvolvimento: u.focoDesenvolvimento || null,
+          updated_at: u.updatedAt
+        }).eq('id', id).then(({ error }) => {
+          if (error) console.error('Erro ao atualizar avaliação no Supabase:', error);
+        });
+      }
+    }
+  };
+
+  const deleteStudentEvaluation = async (id: string): Promise<void> => {
+    if (currentUser.role === 'aluno') {
+      throw new Error('Acesso negado: Alunos não possuem autorização para excluir avaliações.');
+    }
+
+    const currentEval = evaluations.find(e => e.id === id);
+    if (!currentEval) return;
+
+    const targetStudent = students.find(s => s.id === currentEval.studentId);
+    if (currentUser.role === 'professor' && !currentUser.isMasterAdmin) {
+      const isMyStudent = (targetStudent && (
+        targetStudent.professorId === currentUser.professorId ||
+        (targetStudent.professorNome && targetStudent.professorNome.toLowerCase() === currentUser.nome.toLowerCase())
+      )) || hasPermission('canManageStudents');
+      if (!isMyStudent) {
+        throw new Error('Acesso negado: Você só pode excluir avaliações de alunos sob sua responsabilidade técnica.');
+      }
+    }
+
+    setEvaluations(prev => prev.filter(e => e.id !== id));
+
+    if (supabaseConfig.enabled && supabaseConfig.autoSync && supabaseConfig.url && supabaseConfig.anonKey) {
+      const client = getSupabaseClient(supabaseConfig);
+      if (client) {
+        client.from('avaliacoes_desenvolvimento').delete().eq('id', id).then(({ error }) => {
+          if (error) console.error('Erro ao excluir avaliação no Supabase:', error);
+        });
+      }
+    }
+  };
+
   const resetDataToDefault = () => {
     setStudents(INITIAL_STUDENTS);
     setInstructors(INITIAL_INSTRUCTORS);
@@ -1591,6 +1790,7 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProducts(INITIAL_PRODUCTS);
     setEvents(INITIAL_EVENTS);
     setPurchases(INITIAL_PURCHASES);
+    setEvaluations([]);
     setAllUsers(DEMO_USERS);
     setCurrentUser(DEMO_USERS[0]);
     setAcademySettings(DEFAULT_ACADEMY_SETTINGS);
@@ -1670,6 +1870,11 @@ export const BjjProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addEvent,
       toggleEnrollEvent,
       addPurchase,
+      evaluations,
+      addStudentEvaluation,
+      updateStudentEvaluation,
+      deleteStudentEvaluation,
+      getStudentEvaluations,
       resetDataToDefault
     }}>
       {children}

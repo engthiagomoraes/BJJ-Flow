@@ -133,6 +133,74 @@ export interface PerformanceStats {
   raspagensFeitas: number;
 }
 
+export interface DevelopmentScores {
+  guarda: number; // 0 a 10 em passos de 0.5 (Jogo de Guarda & Retenção)
+  passagem: number; // 0 a 10 em passos de 0.5 (Passagem de Guarda & Pressão)
+  quedas: number; // 0 a 10 em passos de 0.5 (Quedas & Luta em Pé)
+  finalizacoes: number; // 0 a 10 em passos de 0.5 (Precisão de Finalizações)
+  defesa: number; // 0 a 10 em passos de 0.5 (Defesas & Escapadas)
+  disciplina: number; // 0 a 10 em passos de 0.5 (Disciplina, Assiduidade & Respeito)
+}
+
+export interface EvaluationDimension {
+  key: keyof DevelopmentScores;
+  label: string;
+  shortLabel: string;
+  description: string;
+}
+
+export const EVALUATION_DIMENSIONS: EvaluationDimension[] = [
+  { 
+    key: 'guarda', 
+    label: 'Jogo de Guarda & Retenção', 
+    shortLabel: 'Guarda & Retenção',
+    description: 'Capacidade de repor guarda, manter ganchos, postura e transições ativas.'
+  },
+  { 
+    key: 'passagem', 
+    label: 'Passagem de Guarda & Pressão', 
+    shortLabel: 'Passagem & Pressão',
+    description: 'Velocidade de passagem, esgrima, controle de quadril e distribuição de peso superior.'
+  },
+  { 
+    key: 'quedas', 
+    label: 'Quedas & Luta em Pé', 
+    shortLabel: 'Quedas & Em Pé',
+    description: 'Postura em pé, pegadas de judô/wrestling, projeções e domínio de distância.'
+  },
+  { 
+    key: 'finalizacoes', 
+    label: 'Precisão de Finalizações', 
+    shortLabel: 'Finalizações',
+    description: 'Ajuste fino de estrangulamentos, alavancas e tempo de ataque sem afobação.'
+  },
+  { 
+    key: 'defesa', 
+    label: 'Defesas & Escapadas', 
+    shortLabel: 'Defesas & Escapadas',
+    description: 'Sobrevivência sob pressão, saída de montada, costas, 100kg e antecipação.'
+  },
+  { 
+    key: 'disciplina', 
+    label: 'Disciplina, Assiduidade & Respeito', 
+    shortLabel: 'Disciplina & Respeito',
+    description: 'Pontualidade, respeito aos companheiros e ao dojo, constância e conduta ética.'
+  }
+];
+
+export interface StudentEvaluation {
+  id: string; // identificador único
+  studentId: string; // identificador do aluno
+  data: string; // YYYY-MM-DD
+  avaliadorId?: string; // identificador do avaliador quando disponível
+  avaliadorNome?: string; // nome do avaliador identificado
+  scores: DevelopmentScores; // seis notas de 0 a 10 em passos de 0.5
+  observacoes?: string; // observações pedagógicas / técnicas opcionais
+  focoDesenvolvimento?: string; // foco de desenvolvimento opcional
+  createdAt: string; // data de criação ISO
+  updatedAt: string; // data da última atualização ISO
+}
+
 export interface LearnedTechnique {
   id: string;
   techniqueId?: string;
@@ -171,6 +239,7 @@ export interface Student {
   professorNome?: string;
   tecnicasAprendidas?: LearnedTechnique[];
   sistemaGraduacao?: GraduationSystemType; // 'graus_e_faixas' ou 'apenas_faixas'
+  ativo?: boolean;
 }
 
 export interface Instructor {
@@ -211,6 +280,8 @@ export interface AttendanceRecord {
   data: string; // YYYY-MM-DD
   horario: string;
   confirmadoPor: string;
+  presente?: boolean;
+  observacao?: string;
 }
 
 export interface LessonPlan {
@@ -218,22 +289,27 @@ export interface LessonPlan {
   data: string; // YYYY-MM-DD
   semanaCiclo: number; // 1 to 4
   temaPrincipal: string;
-  turma: string;
-  professor: string;
-  aquecimento: string;
-  tecnicaPrincipal: string;
+  turma?: string;
+  turmaId?: string;
+  turmaNome?: string;
+  professor?: string;
+  professorId?: string;
+  professorNome?: string;
+  aquecimento?: string;
+  tecnicaPrincipal?: string;
   techniqueIds?: string[]; // IDs das técnicas da biblioteca
   tecnicasNomes?: string[]; // Lista de técnicas ensinadas na aula
-  drillRepeticoes: string;
-  treinoEspecificoRola: string;
+  drillRepeticoes?: string;
+  treinoEspecificoRola?: string;
   observacoes: string;
   concluida: boolean;
+  tecnicas?: any;
 }
 
 export interface Technique {
   id: string;
   titulo: string;
-  categoria: 'Queda' | 'Guarda' | 'Passagem de Guarda' | 'Raspagem' | 'Finalização' | 'Defesa Pessoal' | 'Costas';
+  categoria: 'Queda' | 'Guarda' | 'Passagem de Guarda' | 'Raspagem' | 'Finalização' | 'Defesa Pessoal' | 'Costas' | 'Drill';
   subcategoria?: string;
   faixaMinima: BeltColor;
   nivel: 'Iniciante' | 'Intermediário' | 'Avançado';

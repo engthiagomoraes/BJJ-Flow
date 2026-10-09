@@ -227,8 +227,9 @@ export const Planejamento: React.FC = () => {
           const attendancesCount = attendance.filter(a => 
             a.data === plan.data && (
               a.turmaTitulo === plan.turma ||
-              a.turmaTitulo.toLowerCase().includes(plan.turma.toLowerCase()) ||
-              plan.turma.toLowerCase().includes(a.turmaTitulo.toLowerCase())
+              (plan.turma && a.turmaTitulo.toLowerCase().includes(plan.turma.toLowerCase())) ||
+              (plan.turma && plan.turma.toLowerCase().includes(a.turmaTitulo.toLowerCase())) ||
+              (plan.turmaId && a.turmaId === plan.turmaId)
             )
           ).length;
 

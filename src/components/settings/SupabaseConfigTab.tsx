@@ -62,7 +62,8 @@ export const SupabaseConfigTab: React.FC = () => {
     lessonPlans,
     techniques,
     allUsers,
-    academySettings
+    academySettings,
+    evaluations
   } = useBjj();
 
   const [url, setUrl] = useState(supabaseConfig.url || '');
@@ -211,7 +212,8 @@ export const SupabaseConfigTab: React.FC = () => {
       lessonPlans,
       techniques,
       allUsers,
-      academySettings
+      academySettings,
+      evaluations
     });
     navigator.clipboard.writeText(sql);
     setCopiedDataSql(true);
@@ -229,7 +231,8 @@ export const SupabaseConfigTab: React.FC = () => {
       lessonPlans,
       techniques,
       allUsers,
-      academySettings
+      academySettings,
+      evaluations
     });
     const blob = new Blob([sql], { type: 'text/sql' });
     const downloadUrl = URL.createObjectURL(blob);

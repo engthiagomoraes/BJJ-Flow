@@ -90,8 +90,9 @@ export const Presenca: React.FC = () => {
     const currentClass = classes.find(c => c.id === selectedTurma);
     return currentClass ? (
       lp.turma === currentClass.titulo ||
-      currentClass.titulo.toLowerCase().includes(lp.turma.toLowerCase()) ||
-      lp.turma.toLowerCase().includes(currentClass.titulo.toLowerCase())
+      (lp.turma && currentClass.titulo.toLowerCase().includes(lp.turma.toLowerCase())) ||
+      (lp.turma && lp.turma.toLowerCase().includes(currentClass.titulo.toLowerCase())) ||
+      lp.turmaId === currentClass.id
     ) : true;
   }) || lessonPlans.find(lp => lp.data === selectedDate);
 

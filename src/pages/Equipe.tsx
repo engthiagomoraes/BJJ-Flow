@@ -19,7 +19,8 @@ import { BeltBadge } from '../components/ui/BeltBadge';
 import { Student, BeltColor, PlanType, PaymentStatus } from '../types';
 import { BatchUploadModal } from '../components/import/BatchUploadModal';
 import { StudentPdfReportModal } from '../components/report/StudentPdfReportModal';
-import { FileText } from 'lucide-react';
+import { StudentProfileModal } from '../components/student/StudentProfileModal';
+import { FileText, Activity } from 'lucide-react';
 
 export const Equipe: React.FC = () => {
   const { students, instructors, addStudent, deleteStudent, currentUser, academySettings } = useBjj();
@@ -34,6 +35,7 @@ export const Equipe: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [reportStudent, setReportStudent] = useState<Student | null>(null);
+  const [profileStudent, setProfileStudent] = useState<Student | null>(null);
 
   // Form state
   const [nome, setNome] = useState('');
@@ -297,14 +299,23 @@ export const Equipe: React.FC = () => {
                 Início: {new Date(student.dataInicio).toLocaleDateString('pt-BR')}
               </span>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={() => setProfileStudent(student)}
+                  className="flex items-center gap-1.5 text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 px-2.5 py-1.5 rounded-xl transition-all shadow-2xs"
+                  title="Abrir ficha completa e avaliações pedagógicas do aluno"
+                >
+                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Ficha & Avaliação</span>
+                </button>
+
                 <button
                   onClick={() => setReportStudent(student)}
-                  className="flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-xl transition-all shadow-2xs"
+                  className="flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-xl transition-all shadow-2xs"
                   title="Gerar e enviar relatório pedagógico em PDF para o aluno"
                 >
                   <FileText className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Relatório PDF</span>
+                  <span>PDF</span>
                 </button>
 
                 <button
@@ -319,6 +330,18 @@ export const Equipe: React.FC = () => {
           </div>
         ))}
       </div>
+
+      {/* Student Profile & Evaluation Modal */}
+      {profileStudent && (
+        <StudentProfileModal
+          student={profileStudent}
+          onClose={() => setProfileStudent(null)}
+          onOpenPdfReport={(st) => {
+            setProfileStudent(null);
+            setReportStudent(st);
+          }}
+        />
+      )}
 
       {/* Student PDF Report Modal */}
       {reportStudent && (
